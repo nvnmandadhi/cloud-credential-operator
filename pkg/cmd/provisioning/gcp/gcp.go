@@ -12,6 +12,7 @@ type options struct {
 	Region                   string
 	Name                     string
 	Project                  string
+	SharedVpcHostProject     string
 	WorkloadIdentityPool     string
 	WorkloadIdentityProvider string
 	CredRequestDir           string

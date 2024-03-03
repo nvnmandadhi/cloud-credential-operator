@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -79,7 +80,7 @@ var (
 	}
 )
 
-func createServiceAccounts(ctx context.Context, client gcp.Client, name, workloadIdentityPool, workloadIdentityProvider, credReqDir, targetDir string, enableTechPreview, generateOnly bool) error {
+func createServiceAccounts(ctx context.Context, client gcp.Client, name, workloadIdentityPool, workloadIdentityProvider, credReqDir, targetDir string, enableTechPreview bool, sharedVpcHostProject string, generateOnly bool) error {
 	// Process directory
 	credRequests, err := provisioning.GetListOfCredentialsRequests(credReqDir, enableTechPreview)
 	if err != nil {
@@ -87,17 +88,18 @@ func createServiceAccounts(ctx context.Context, client gcp.Client, name, workloa
 	}
 
 	// Create service accounts
-	if err := processCredentialsRequests(ctx, client, credRequests, name, workloadIdentityPool, workloadIdentityProvider, targetDir, generateOnly); err != nil {
+	if err := processCredentialsRequests(ctx, client, credRequests, name, workloadIdentityPool, workloadIdentityProvider, sharedVpcHostProject, targetDir, generateOnly); err != nil {
 		return errors.Wrap(err, "Failed while processing each CredentialsRequest")
 	}
 
 	return nil
 }
 
-func processCredentialsRequests(ctx context.Context, client gcp.Client, credReqs []*credreqv1.CredentialsRequest, name, workloadIdentityPool, workloadIdentityProvider, targetDir string, generateOnly bool) error {
+func processCredentialsRequests(ctx context.Context, client gcp.Client, credReqs []*credreqv1.CredentialsRequest, name, workloadIdentityPool, workloadIdentityProvider, sharedVpcHostProject string, targetDir string, generateOnly bool) error {
 	project := client.GetProjectName()
 	for i, cr := range credReqs {
-		_, err := createServiceAccount(ctx, client, name, cr, i, workloadIdentityPool, workloadIdentityProvider, project, targetDir, generateOnly)
+		_, err := createServiceAccount(ctx, client, name, cr, i, workloadIdentityPool, workloadIdentityProvider, project, sharedVpcHostProject, targetDir, generateOnly)
+		time.Sleep(20 * time.Second)
 		if err != nil {
 			return err
 		}
@@ -106,7 +108,7 @@ func processCredentialsRequests(ctx context.Context, client gcp.Client, credReqs
 	return nil
 }
 
-func createServiceAccount(ctx context.Context, client gcp.Client, name string, credReq *credreqv1.CredentialsRequest, serviceAccountNum int, workloadIdentityPool, workloadIdentityProvider, project, targetDir string, generateOnly bool) (string, error) {
+func createServiceAccount(ctx context.Context, client gcp.Client, name string, credReq *credreqv1.CredentialsRequest, serviceAccountNum int, workloadIdentityPool, workloadIdentityProvider, project, sharedVpcHostProject, targetDir string, generateOnly bool) (string, error) {
 	// The credReq must have a non zero-length list of ServiceAccountNames
 	// that can be used to restrict which k8s ServiceAccounts can use the GCP ServiceAccount.
 	if len(credReq.Spec.ServiceAccountNames) == 0 {
@@ -237,6 +239,12 @@ func createServiceAccount(ctx context.Context, client gcp.Client, name string, c
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
 				serviceAccount, err = actuator.CreateServiceAccount(client, serviceAccountID, serviceAccountName, createdByCcoctlForSvcAcct, project)
+				if sharedVpcHostProject != "" {
+					err = addSharedVpcPermissionsForMachineApiServiceAccount(sharedVpcHostProject, serviceAccountID, actuator.ServiceAccountBindingName(serviceAccount))
+					if err != nil {
+						return "", errors.Wrap(err, "Failed to add shared VPC permissions for the machine API service account")
+					}
+				}
 				if err != nil {
 					return "", errors.Wrap(err, "Failed to create IAM service account")
 				}
@@ -309,6 +317,27 @@ func createServiceAccount(ctx context.Context, client gcp.Client, name string, c
 		return "", errors.Wrap(err, "Failed to save secret for install manifests")
 	}
 	return "", nil
+}
+
+func addSharedVpcPermissionsForMachineApiServiceAccount(project string, serviceAccountID string, serviceAccountBindingName string) error {
+	ctx := context.Background()
+	creds, err := loadCredentials(ctx)
+	if err != nil {
+		log.Fatalf("Failed to load credentials: %s", err)
+	}
+	client, err := gcp.NewClient(project, creds)
+	if err != nil {
+		log.Fatalf("Failed to initiate GCP client: %s", err)
+	}
+	if strings.Contains(serviceAccountID, "openshift-m") {
+		log.Printf("Adding shared VPC role for serviceAccount %s", serviceAccountBindingName)
+		err = actuator.EnsurePolicyBindingsForProject(client, []string{"roles/compute.networkUser"}, serviceAccountBindingName)
+		if err != nil {
+			log.Fatalf("Failed to add shared VPC host permissions for the service account: %s", err)
+			return err
+		}
+	}
+	return nil
 }
 
 // createShellScript creates a shell script given commands to execute
@@ -436,9 +465,7 @@ func createServiceAccountsCmd(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
-	err = createServiceAccounts(ctx, gcpClient, CreateServiceAccountsOpts.Name, CreateServiceAccountsOpts.WorkloadIdentityPool,
-		CreateServiceAccountsOpts.WorkloadIdentityProvider, CreateServiceAccountsOpts.CredRequestDir, CreateServiceAccountsOpts.TargetDir,
-		CreateServiceAccountsOpts.EnableTechPreview, CreateServiceAccountsOpts.DryRun)
+	err = createServiceAccounts(ctx, gcpClient, CreateServiceAccountsOpts.Name, CreateServiceAccountsOpts.WorkloadIdentityPool, CreateServiceAccountsOpts.WorkloadIdentityProvider, CreateServiceAccountsOpts.CredRequestDir, CreateServiceAccountsOpts.TargetDir, CreateServiceAccountsOpts.EnableTechPreview, CreateServiceAccountsOpts.SharedVpcHostProject, CreateServiceAccountsOpts.DryRun)
 	if err != nil {
 		log.Fatal(err)
 	}

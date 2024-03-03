@@ -52,7 +52,7 @@ func createAllCmd(cmd *cobra.Command, args []string) {
 	}
 
 	if err = createServiceAccounts(ctx, gcpClient, CreateAllOpts.Name, CreateAllOpts.Name, CreateAllOpts.Name, CreateAllOpts.CredRequestDir,
-		CreateAllOpts.TargetDir, CreateAllOpts.EnableTechPreview, false); err != nil {
+		CreateAllOpts.TargetDir, CreateAllOpts.EnableTechPreview, CreateAllOpts.SharedVpcHostProject, false); err != nil {
 		log.Fatalf("Failed to create IAM service accounts: %s", err)
 	}
 }
@@ -112,6 +112,7 @@ func NewCreateAllCmd() *cobra.Command {
 	createAllCmd.MarkPersistentFlagRequired("name")
 	createAllCmd.PersistentFlags().StringVar(&CreateAllOpts.Region, "region", "us", "Google cloud region where the Google Storage Bucket holding the OpenID Connect configuration will be created")
 	createAllCmd.PersistentFlags().StringVar(&CreateAllOpts.Project, "project", "", "ID of the Google cloud project")
+	createAllCmd.PersistentFlags().StringVar(&CreateAllOpts.SharedVpcHostProject, "shared-vpc-host-project", "", "ID of the Google cloud shared vpc host project")
 	createAllCmd.MarkPersistentFlagRequired("project")
 	createAllCmd.PersistentFlags().StringVar(&CreateAllOpts.CredRequestDir, "credentials-requests-dir", "", "Directory containing files of CredentialsRequests to create gcp service accounts for (can be created by running 'oc adm release extract --credentials-requests --cloud=gcp' against an OpenShift release image)")
 	createAllCmd.MarkPersistentFlagRequired("credentials-requests-dir")
