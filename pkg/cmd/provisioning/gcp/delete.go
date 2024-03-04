@@ -207,7 +207,14 @@ func deleteCmd(cmd *cobra.Command, args []string) {
 	}
 
 	if DeleteOpts.ForceDeleteCustomRoles {
+		log.Print("Deleting shared vpc iam resources")
 		if err := deleteCustomRoles(ctx, gcpClient, DeleteOpts.CredRequestDir); err != nil {
+			log.Print(err)
+		}
+	}
+
+	if DeleteOpts.SharedVpcHostProject != "" {
+		if err := deleteSharedVpcHostIamResources(ctx, gcpClient, DeleteOpts.Name, DeleteOpts.SharedVpcHostProject); err != nil {
 			log.Print(err)
 		}
 	}
@@ -219,6 +226,38 @@ func deleteCmd(cmd *cobra.Command, args []string) {
 	if err := deleteWorkloadIdentityPool(ctx, gcpClient, DeleteOpts.Name); err != nil {
 		log.Print(err)
 	}
+}
+
+func deleteSharedVpcHostIamResources(ctx context.Context, client gcp.Client, name string, sharedVpcHostProject string) error {
+	creds, err := loadCredentials(ctx)
+	if err != nil {
+		log.Fatalf("Failed to load credentials: %s", err)
+	}
+	sharedVpcHostProjectClient, err := gcp.NewClient(sharedVpcHostProject, creds)
+	projectName := sharedVpcHostProjectClient.GetProjectName()
+	projectResourceName := fmt.Sprintf("projects/%s", projectName)
+	listServiceAccountsRequest := &iamadminpb.ListServiceAccountsRequest{
+		Name: projectResourceName,
+	}
+	if err != nil {
+		log.Fatalf("Failed to initiate GCP client: %s", err)
+	}
+	svcAccounts, err := sharedVpcHostProjectClient.ListServiceAccounts(ctx, listServiceAccountsRequest)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to fetch list of service accounts")
+	}
+	for _, svcAcct := range svcAccounts {
+		saEmail := svcAcct.GetEmail()
+		if strings.Contains(saEmail, name) {
+			svcAcctBindingName := actuator.ServiceAccountBindingName(svcAcct)
+			err := actuator.RemovePolicyBindingsForProject(client, svcAcctBindingName)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to remove project policy bindings for service account")
+			}
+			log.Printf("IAM bindings deleted for service account %s", svcAcct.DisplayName)
+		}
+	}
+	return nil
 }
 
 // validationForDeleteCmd will validate the arguments to the command
@@ -241,6 +280,7 @@ func NewDeleteCmd() *cobra.Command {
 	deleteCmd.PersistentFlags().StringVar(&DeleteOpts.Name, "name", "", "User-defined name for all created google cloud resources (can be separate from the cluster's infra-id)")
 	deleteCmd.MarkPersistentFlagRequired("name")
 	deleteCmd.PersistentFlags().StringVar(&DeleteOpts.Project, "project", "", "ID of the google cloud project")
+	deleteCmd.PersistentFlags().StringVar(&CreateAllOpts.SharedVpcHostProject, "shared-vpc-host-project", "", "ID of the Google cloud shared vpc host project")
 	deleteCmd.MarkPersistentFlagRequired("project")
 	deleteCmd.PersistentFlags().StringVar(&DeleteOpts.CredRequestDir, "credentials-requests-dir", "", "Directory containing files of CredentialsRequests to delete IAM Roles for (can be created by running 'oc adm release extract --credentials-requests --cloud=ibmcloud' against an OpenShift release image)")
 	deleteCmd.MarkPersistentFlagRequired("credentials-requests-dir")

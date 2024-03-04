@@ -242,7 +242,7 @@ func createServiceAccount(ctx context.Context, client gcp.Client, name string, c
 				if sharedVpcHostProject != "" {
 					err = addSharedVpcPermissionsForMachineApiServiceAccount(sharedVpcHostProject, serviceAccountID, actuator.ServiceAccountBindingName(serviceAccount))
 					if err != nil {
-						return "", errors.Wrap(err, "Failed to add shared VPC permissions for the machine API service account")
+						return "", errors.Wrap(err, "Failed to add compute network user permissions in shared VPC host project for the machine API service account")
 					}
 				}
 				if err != nil {
@@ -333,7 +333,7 @@ func addSharedVpcPermissionsForMachineApiServiceAccount(project string, serviceA
 		log.Printf("Adding shared VPC role for serviceAccount %s", serviceAccountBindingName)
 		err = actuator.EnsurePolicyBindingsForProject(client, []string{"roles/compute.networkUser"}, serviceAccountBindingName)
 		if err != nil {
-			log.Fatalf("Failed to add shared VPC host permissions for the service account: %s", err)
+			log.Fatalf("Failed to add compute network user permissions in shared VPC host project for the service account: %s", err)
 			return err
 		}
 	}
